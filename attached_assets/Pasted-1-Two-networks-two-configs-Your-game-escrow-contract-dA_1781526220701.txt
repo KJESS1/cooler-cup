@@ -1,0 +1,55 @@
+1. Two networks, two configs
+Your game/escrow contract + dApp Kit frontend → testnet (free faucet). Get free testnet SUI:
+bashsui client switch --env testnet
+sui client faucet
+Then deploy your cooler_cup Move package the same way as before, but on testnet — and point your frontend's SuiClientProvider at getFullnodeUrl('testnet') and defaultNetwork="testnet" instead of mainnet.
+Your Walrus calls → mainnet (separate client, in your backend only).
+
+2. Walrus mainnet write/read via SDK (backend)
+bashnpm install @mysten/walrus
+js// server/walrus.js
+const { SuiClient, getFullnodeUrl } = require('@mysten/sui/client');
+const { WalrusClient, WalrusFile } = require('@mysten/walrus');
+const { Ed25519Keypair } = require('@mysten/sui/keypairs/ed25519');
+
+const suiClient = new SuiClient({ url: getFullnodeUrl('mainnet') });
+const walrusClient = new WalrusClient({ network: 'mainnet', suiClient });
+const walrusKeypair = Ed25519Keypair.fromSecretKey(process.env.WALRUS_WALLET_KEY);
+
+async function writeMemory(address, memory) {
+  const file = WalrusFile.from({
+    contents: new TextEncoder().encode(JSON.stringify(memory)),
+    identifier: `memory-${address}.json`,
+  });
+  const [result] = await walrusClient.writeFiles({
+    files: [file],
+    epochs: 3,
+    deletable: true,
+    signer: walrusKeypair,
+  });
+  return result.blobId; // save this string against the address
+}
+
+async function readMemory(blobId) {
+  const [file] = await walrusClient.readFiles({ ids: [blobId] });
+  const text = new TextDecoder().decode(await file.bytes());
+  return JSON.parse(text);
+}
+
+module.exports = { writeMemory, readMemory };
+Add WALRUS_WALLET_KEY (your funded mainnet wallet's private key, bech32/base64 export from Slush) to Replit Secrets.
+
+Heads up: the exact method names on @mysten/walrus shift between versions occasionally. If this throws errors, paste the error into Replit's AI agent along with "check the installed @mysten/walrus package's types for the correct write/read method" — it'll usually fix small API drift like this itself.
+
+
+3. Swap into the "active memory" server from before
+Take the Express server I gave you earlier and replace just the two Replit DB lines:
+js// instead of: const mem = await db.get(`memory:${address}`)
+const blobId = await db.get(`blobid:${address}`); // keep this tiny pointer in Replit DB (free, instant)
+const mem = blobId ? await readMemory(blobId) : defaultMemory(address);
+
+// instead of: await db.set(`memory:${address}`, mem)
+const newBlobId = await writeMemory(address, mem);
+await db.set(`blobid:${address}`, newBlobId);
+Everything else — the greeting endpoint, the /api/play endpoint, the Frost prompts referencing history — stays exactly the same. You get free, instant address→blobId lookup via Replit DB, but the actual memory content is genuinely stored on Walrus mainnet, and you can show judges the live blob at https://aggregator.walrus-mainnet.walrus.space/v1/blobs/<blobId>.
+This gives you: testnet game (free, unlimited testing) + real mainnet Walrus memory (tiny real cost, satisfies the Walrus session requirement) + an agent that visibly remembers across sessions.

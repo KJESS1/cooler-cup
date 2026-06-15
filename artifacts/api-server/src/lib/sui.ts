@@ -3,7 +3,7 @@ import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { Transaction } from '@mysten/sui/transactions';
 import { logger } from './logger.js';
 
-const NETWORK = (process.env.SUI_NETWORK as 'mainnet' | 'testnet') ?? 'mainnet';
+const NETWORK = (process.env.SUI_NETWORK as 'mainnet' | 'testnet') ?? 'testnet';
 
 let _client: SuiJsonRpcClient | null = null;
 let _keypair: Ed25519Keypair | null = null;

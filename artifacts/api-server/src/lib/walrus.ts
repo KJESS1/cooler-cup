@@ -1,43 +1,54 @@
+import { WalrusClient } from '@mysten/walrus';
+import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from '@mysten/sui/jsonRpc';
+import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import type { PlayerMemory } from './types.js';
 import { logger } from './logger.js';
 
-const PUBLISHER_URL = process.env.WALRUS_PUBLISHER_URL;
-const PUBLISHER_KEY = process.env.WALRUS_PUBLISHER_KEY;
-const AGGREGATOR_URL =
-  process.env.WALRUS_AGGREGATOR_URL ?? 'https://aggregator.walrus-mainnet.walrus.space/v1/blobs';
+let _walrusClient: WalrusClient | null = null;
+let _keypair: Ed25519Keypair | null = null;
+
+function getWalrusClient(): WalrusClient {
+  if (!_walrusClient) {
+    const suiClient = new SuiJsonRpcClient({ url: getJsonRpcFullnodeUrl('mainnet') });
+    _walrusClient = new WalrusClient({ network: 'mainnet', suiClient });
+  }
+  return _walrusClient;
+}
+
+function getWalrusKeypair(): Ed25519Keypair {
+  if (!_keypair) {
+    const key = process.env.WALRUS_WALLET_KEY;
+    if (!key) throw new Error('WALRUS_WALLET_KEY not set');
+    _keypair = Ed25519Keypair.fromSecretKey(key);
+  }
+  return _keypair;
+}
+
+const AGGREGATOR = 'https://aggregator.walrus-mainnet.walrus.space/v1/blobs';
 
 export async function writeMemory(memory: PlayerMemory): Promise<string> {
-  if (!PUBLISHER_URL || !PUBLISHER_KEY) {
-    throw new Error('Walrus publisher not configured (WALRUS_PUBLISHER_URL / WALRUS_PUBLISHER_KEY)');
-  }
-  const res = await fetch(PUBLISHER_URL, {
-    method: 'PUT',
-    headers: {
-      Authorization: `Bearer ${PUBLISHER_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(memory),
+  const client = getWalrusClient();
+  const keypair = getWalrusKeypair();
+  const blob = new TextEncoder().encode(JSON.stringify(memory));
+
+  const { blobId } = await client.writeBlob({
+    blob,
+    epochs: 3,
+    deletable: true,
+    signer: keypair,
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Walrus write failed ${res.status}: ${text}`);
-  }
-  const data = (await res.json()) as {
-    newlyCreated?: { blobObject: { blobId: string } };
-    alreadyCertified?: { blobId: string };
-  };
-  const blobId = data.newlyCreated?.blobObject?.blobId ?? data.alreadyCertified?.blobId;
-  if (!blobId) throw new Error('Walrus response missing blobId');
+
   logger.info({ blobId, address: memory.address }, 'Walrus memory written');
   return blobId;
 }
 
 export async function readMemory(blobId: string): Promise<PlayerMemory> {
-  const res = await fetch(`${AGGREGATOR_URL}/${blobId}`);
-  if (!res.ok) throw new Error(`Walrus read failed ${res.status}`);
-  return res.json() as Promise<PlayerMemory>;
+  const client = getWalrusClient();
+  const { bytes } = await client.readBlob({ blobId });
+  const text = new TextDecoder().decode(bytes);
+  return JSON.parse(text) as PlayerMemory;
 }
 
 export function aggregatorUrl(blobId: string): string {
-  return `${AGGREGATOR_URL}/${blobId}`;
+  return `${AGGREGATOR}/${blobId}`;
 }
