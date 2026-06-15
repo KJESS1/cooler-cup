@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@mysten/sui": "^2.17.0",
     "@replit/database": "^3.0.1",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",

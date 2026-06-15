@@ -1,0 +1,439 @@
+# Cooler Cup — Build Guide (Sui Mainnet + Walrus Mainnet)
+
+A football platform: play penalty-shootout duels vs friends (real SUI stakes, escrowed on-chain)
+or vs an AI agent that remembers your history via Walrus. Plus a World Cup Predictions mode.
+
+---
+
+## 0. Before You Start — accounts & tokens
+
+You need, in a Sui **mainnet** wallet (Slush / Sui Wallet):
+- A small amount of real **SUI** for gas (a few dollars' worth is plenty for a hackathon demo).
+- A second wallet to act as your **Admin/House** wallet (the app's "referee" — resolves games
+  and seeds the predictions pool). Fund it with a bit more SUI for gas + payouts.
+
+For Walrus mainnet **writes**, sign up for an authenticated publisher key (e.g. Nami Cloud's
+Walrus publisher, or any provider offering `PUT /v1/blobs` with an API key). Keep this key
+server-side only — never in frontend code.
+
+For the AI agent, get an Anthropic API key. Keep this server-side too.
+
+In Replit: create a new **Node.js + Vite/React** repl. We'll add a tiny Express backend in the
+same repl for the two things that need secret keys (Walrus writes, AI agent calls).
+
+---
+
+## 1. Project Setup
+
+```bash
+npm create vite@latest cooler-cup -- --template react-ts
+cd cooler-cup
+npm install @mysten/dapp-kit @mysten/sui @tanstack/react-query express dotenv cors
+```
+
+Create a `.env` (never commit this — Replit has a Secrets tab, use that instead):
+
+```
+ADMIN_PRIVATE_KEY=suiprivkey1...      # your house/admin wallet, base64 or bech32 export
+WALRUS_PUBLISHER_URL=https://your-authenticated-publisher.example/v1/blobs
+WALRUS_PUBLISHER_KEY=your-api-key
+WALRUS_AGGREGATOR_URL=https://aggregator.walrus-mainnet.walrus.space/v1/blobs
+ANTHROPIC_API_KEY=sk-ant-...
+PACKAGE_ID=0x...   # filled in after you deploy the Move contract in Step 3
+ADMIN_CAP_ID=0x... # filled in after deploy
+HOUSE_ADDRESS=0x... # the admin wallet's address
+```
+
+---
+
+## 2. Wallet Connection (mainnet)
+
+`src/main.tsx`:
+
+```tsx
+import { createNetworkConfig, SuiClientProvider, WalletProvider } from '@mysten/dapp-kit';
+import { getFullnodeUrl } from '@mysten/sui/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import '@mysten/dapp-kit/dist/index.css';
+
+const { networkConfig } = createNetworkConfig({
+  mainnet: { url: getFullnodeUrl('mainnet') },
+});
+const queryClient = new QueryClient();
+
+createRoot(document.getElementById('root')!).render(
+  <QueryClientProvider client={queryClient}>
+    <SuiClientProvider networks={networkConfig} defaultNetwork="mainnet">
+      <WalletProvider autoConnect>
+        <App />
+      </WalletProvider>
+    </SuiClientProvider>
+  </QueryClientProvider>
+);
+```
+
+In any component:
+
+```tsx
+import { ConnectButton, useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
+
+function Header() {
+  const account = useCurrentAccount();
+  return (
+    <header>
+      <ConnectButton />
+      {account && <span>{account.address.slice(0, 6)}...{account.address.slice(-4)}</span>}
+    </header>
+  );
+}
+```
+
+This is the real on-chain identity layer — drop the fake "Hey, kjess" username entirely.
+
+---
+
+## 3. Move Escrow Contract
+
+This single `Game` struct powers BOTH the vs-friend wager AND World Cup predictions
+(predictions = a "game" where `player_two` is the House address).
+
+`sources/cooler_cup.move`:
+
+```move
+module cooler_cup::game_escrow {
+    use sui::coin::{Self, Coin};
+    use sui::sui::SUI;
+    use sui::balance::{Self, Balance};
+
+    const EGameFull: u64 = 0;
+    const EWrongStake: u64 = 1;
+    const EGameNotFull: u64 = 2;
+    const EAlreadyResolved: u64 = 3;
+    const EInvalidWinner: u64 = 4;
+
+    /// Held by your house/admin wallet — only it can resolve games.
+    public struct AdminCap has key { id: UID }
+
+    /// A single 1v1 wagered game (or a prediction vs the House).
+    public struct Game has key {
+        id: UID,
+        player_one: address,
+        player_two: address,
+        stake: u64,
+        pot: Balance<SUI>,
+        resolved: bool,
+    }
+
+    fun init(ctx: &mut TxContext) {
+        transfer::transfer(AdminCap { id: object::new(ctx) }, ctx.sender());
+    }
+
+    /// Player one creates a game, staking `stake_coin`.
+    public entry fun create_game(stake_coin: Coin<SUI>, ctx: &mut TxContext) {
+        let stake = coin::value(&stake_coin);
+        let game = Game {
+            id: object::new(ctx),
+            player_one: ctx.sender(),
+            player_two: @0x0,
+            stake,
+            pot: coin::into_balance(stake_coin),
+            resolved: false,
+        };
+        transfer::share_object(game);
+    }
+
+    /// Player two (or the House, for predictions) matches the stake to join.
+    public entry fun join_game(game: &mut Game, stake_coin: Coin<SUI>, ctx: &mut TxContext) {
+        assert!(game.player_two == @0x0, EGameFull);
+        assert!(coin::value(&stake_coin) == game.stake, EWrongStake);
+        game.player_two = ctx.sender();
+        balance::join(&mut game.pot, coin::into_balance(stake_coin));
+    }
+
+    /// Admin (your backend) resolves the game and pays the full pot to the winner.
+    public entry fun resolve_game(_admin: &AdminCap, game: &mut Game, winner: address, ctx: &mut TxContext) {
+        assert!(!game.resolved, EAlreadyResolved);
+        assert!(game.player_two != @0x0, EGameNotFull);
+        assert!(winner == game.player_one || winner == game.player_two, EInvalidWinner);
+
+        let amount = balance::value(&game.pot);
+        let payout = coin::take(&mut game.pot, amount, ctx);
+        transfer::public_transfer(payout, winner);
+        game.resolved = true;
+    }
+}
+```
+
+### Deploy to mainnet
+
+```bash
+sui client switch --env mainnet
+sui client publish --gas-budget 100000000
+```
+
+From the output, save:
+- **Package ID** → `PACKAGE_ID`
+- The `AdminCap` object ID (owned by your deployer address) → `ADMIN_CAP_ID`
+
+> Test this on **testnet first** with the same commands (`sui client switch --env testnet`,
+> get free SUI from a faucet). Once `create_game` → `join_game` → `resolve_game` works
+> end-to-end on testnet, redeploy the identical code to mainnet.
+
+### Frontend: creating/joining a game
+
+```tsx
+import { Transaction } from '@mysten/sui/transactions';
+
+function createGame(stakeMist: number) {
+  const tx = new Transaction();
+  const [coin] = tx.splitCoins(tx.gas, [stakeMist]);
+  tx.moveCall({
+    target: `${PACKAGE_ID}::game_escrow::create_game`,
+    arguments: [coin],
+  });
+  return tx; // pass to signAndExecuteTransaction
+}
+
+function joinGame(gameId: string, stakeMist: number) {
+  const tx = new Transaction();
+  const [coin] = tx.splitCoins(tx.gas, [stakeMist]);
+  tx.moveCall({
+    target: `${PACKAGE_ID}::game_escrow::join_game`,
+    arguments: [tx.object(gameId), coin],
+  });
+  return tx;
+}
+```
+
+### Backend: resolving (Admin signs this — never expose admin key to frontend)
+
+`server/resolve.ts`:
+
+```ts
+import { Transaction } from '@mysten/sui/transactions';
+import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
+import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
+
+const client = new SuiClient({ url: getFullnodeUrl('mainnet') });
+const adminKeypair = Ed25519Keypair.fromSecretKey(process.env.ADMIN_PRIVATE_KEY!);
+
+export async function resolveGame(gameId: string, winner: string) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${process.env.PACKAGE_ID}::game_escrow::resolve_game`,
+    arguments: [tx.object(process.env.ADMIN_CAP_ID!), tx.object(gameId), tx.pure.address(winner)],
+  });
+  return client.signAndExecuteTransaction({ signer: adminKeypair, transaction: tx });
+}
+```
+
+---
+
+## 4. The Game — Penalty Shootout
+
+Simple, fast to build, clearly "football," and gambling-friendly.
+
+**Rules**: Each player takes 5 kicks. On each kick, the kicker secretly picks one of 5 zones
+(top-left, top-right, bottom-left, bottom-right, center) and the keeper secretly picks one
+zone to dive to. If they differ → GOAL. If they match → SAVE. Most goals after 5 rounds wins;
+tie → sudden death, one kick each, repeat until someone scores and the other doesn't.
+
+### vs Agent (no escrow — practice/casual mode)
+
+All client-side or via your backend. The agent's keeper picks are informed by the player's
+Walrus memory (see Step 5) — e.g. if the memory shows the player favors "top-left" 40% of the
+time, weight the agent's dive choice toward top-left.
+
+```ts
+function agentDiveChoice(memory: PlayerMemory): Zone {
+  const zones: Zone[] = ['TL','TR','BL','BR','C'];
+  const weights = zones.map(z => memory.kickHistory[z] ?? 1); // higher freq = more likely dive
+  return weightedRandom(zones, weights);
+}
+```
+
+### vs Friend (real SUI stake)
+
+Keep the game state itself in a lightweight backend store (Replit DB or even an in-memory
+Map keyed by game code is fine for a hackathon demo) — only the **stake and payout** touch
+the blockchain.
+
+Flow:
+1. Player A picks a stake amount → calls `create_game` → gets `gameId` → shares a link/code
+   with Player B (`/play/<gameId>`).
+2. Player B opens the link, sees the stake, calls `join_game` with matching stake.
+3. Both players submit their 5 kicker picks + 5 keeper picks to your backend (simple POST,
+   stored under `gameId`). Don't reveal either side's picks in the UI until both have submitted.
+4. Backend computes the result, determines `winner` address, and calls `resolveGame(gameId, winner)`
+   from Step 3's backend function.
+5. Frontend polls or gets pushed the result and shows the animated shootout + payout confirmation.
+
+> Known simplification: picks are revealed server-side rather than via cryptographic
+> commit/reveal. Fine for a hackathon demo — note it as a "future hardening" item in your
+> submission write-up if you want bonus security points.
+
+---
+
+## 5. Walrus Mainnet — Agent Memory
+
+### What gets stored
+
+A small JSON blob per player:
+
+```json
+{
+  "address": "0x...",
+  "gamesPlayed": 12,
+  "wins": 7,
+  "losses": 5,
+  "kickHistory": { "TL": 5, "TR": 2, "BL": 3, "BR": 1, "C": 1 },
+  "diveHistory": { "TL": 4, "TR": 3, "BL": 2, "BR": 2, "C": 1 },
+  "predictions": [
+    { "match": "Argentina vs Brazil", "pick": "Argentina", "result": "win", "stake": 1000000000 }
+  ],
+  "notes": "Tends to go top-left under pressure. Backed underdogs twice and lost both."
+}
+```
+
+### Writing (via authenticated publisher — backend only)
+
+```ts
+export async function writeMemory(address: string, memory: PlayerMemory): Promise<string> {
+  const res = await fetch(process.env.WALRUS_PUBLISHER_URL!, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${process.env.WALRUS_PUBLISHER_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(memory),
+  });
+  const data = await res.json();
+  // data.newlyCreated.blobObject.blobId  (or data.alreadyCertified.blobId)
+  return data.newlyCreated?.blobObject?.blobId ?? data.alreadyCertified?.blobId;
+}
+```
+
+### Reading (public aggregator — can be called from frontend)
+
+```ts
+export async function readMemory(blobId: string): Promise<PlayerMemory> {
+  const res = await fetch(`${WALRUS_AGGREGATOR_URL}/${blobId}`);
+  return res.json();
+}
+```
+
+### The pointer problem
+
+Walrus has no "look up by address" — you need to remember each player's *latest blob ID*.
+Simplest fix for today: a tiny key-value table in your backend (Replit DB: `address → blobId`).
+This is the one piece that isn't "fully on-chain" — note it honestly in your write-up as a
+known centralization point, and mention that a small Move "memory pointer" object (owned by
+each player, storing their current `blob_id`) is the natural next step if you have time.
+
+**Stretch upgrade**: add a second tiny Move struct:
+
+```move
+public struct MemoryPointer has key {
+    id: UID,
+    owner: address,
+    blob_id: vector<u8>,
+}
+
+public entry fun set_memory_pointer(ptr: &mut MemoryPointer, blob_id: vector<u8>, ctx: &TxContext) {
+    assert!(ptr.owner == ctx.sender(), 0);
+    ptr.blob_id = blob_id;
+}
+```
+
+---
+
+## 6. The AI Agent
+
+A backend endpoint that takes the player's memory + game context and returns commentary
+(and, for vs-agent games, the agent's next move).
+
+`server/agent.ts`:
+
+```ts
+export async function askAgent(memory: PlayerMemory, context: string) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': process.env.ANTHROPIC_API_KEY!,
+      'anthropic-version': '2023-06-01',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 200,
+      messages: [{
+        role: 'user',
+        content: `You are "Frost," a cheeky AI football rival on Cooler Cup.
+Player memory: ${JSON.stringify(memory)}
+Context: ${context}
+Reply in 1-2 short, playful sentences referencing their history if relevant.`
+      }],
+    }),
+  });
+  const data = await res.json();
+  return data.content.find((c: any) => c.type === 'text')?.text ?? '';
+}
+```
+
+Call this after a match ends, or before a World Cup prediction, to get a personalized line
+from Frost. This is your "agent with memory" centerpiece — make sure it's visible in the demo.
+
+---
+
+## 7. World Cup Predictions Mode
+
+Hardcode upcoming matches in `src/data/matches.ts`:
+
+```ts
+export const matches = [
+  { id: 'm1', teams: 'Argentina vs Brazil', date: '2026-06-20' },
+  { id: 'm2', teams: 'France vs Germany', date: '2026-06-21' },
+  // ... 4-6 total
+];
+```
+
+Each prediction = a `Game` where the user is `player_one`, stakes their pick amount, and your
+**House wallet** (a small backend script) immediately calls `join_game` as `player_two` with
+a matching stake from the pre-funded house pool. After the real match result is known, you
+(as admin) call `resolveGame(gameId, winnerAddress)` — manually, from a small admin page or
+script. No live oracle needed for the hackathon.
+
+Before the user confirms a prediction, call `askAgent` with their memory — Frost can comment
+on their pattern ("You're 0-2 on penalty favorites this tournament...").
+
+---
+
+## 8. Tying It Together — Pages
+
+- **Home**: connect wallet, shows your record (from your memory blob) and a Frost greeting.
+- **Play**: choose "vs Friend" (create/join via link) or "vs Agent" (instant).
+- **World Cup**: list of matches, predict + stake, Frost commentary.
+- **Profile**: wallet address, win/loss record, blob ID link (so judges can open it directly
+  on the aggregator and see your raw memory JSON — great proof of real Walrus usage).
+
+Keep the visual identity from your existing Clay Cooler branding (icy blue/orange palette,
+rounded chunky buttons) — just swap the Hatchery/Discovery nav for Home / Play / World Cup / Profile.
+
+---
+
+## 9. Demo & Submission Checklist
+
+- [ ] Wallet connects to **mainnet**, shows real address + balance.
+- [ ] Move package deployed to **mainnet** — include the package ID in your submission.
+- [ ] Play a full vs-Agent shootout — Frost comments using memory.
+- [ ] Play a full vs-Friend shootout with a second wallet/device — real SUI moves on stake-in
+      and payout (check both addresses on Sui mainnet explorer).
+- [ ] Make a World Cup prediction — show the Walrus blob ID and open it in a browser
+      (`https://aggregator.walrus-mainnet.walrus.space/v1/blobs/<blobId>`) to prove it's
+      really on Walrus mainnet.
+- [ ] Record the demo video doing all of the above in one continuous take if possible.
+- [ ] In your write-up, be upfront about the two simplifications (server-side pick reveal,
+      backend address→blobId table) and frame them as "v2 roadmap" items — judges respect
+      honesty over hidden shortcuts.
+
+Good luck — this is a strong, novel, finishable scope. Ship it.
