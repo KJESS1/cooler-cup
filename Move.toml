@@ -1,9 +1,10 @@
-[package]
-name = "cooler_cup"
+ [package]
+ name = "cooler_cup"
+ version = "1.0.0"
 edition = "2024.beta"
 
-[dependencies]
-Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "testnet-v1.73.1" }
+ [dependencies]
+ Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "testnet-v1.73.1" }
 
-[addresses]
-cooler_cup = "0x0"
+ [addresses]
+ cooler_cup = "0x0"
