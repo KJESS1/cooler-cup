@@ -3,7 +3,7 @@
  const { chat, getMemory, saveMemory } = require('./agent.cjs');
  const { resolveGame } = require('./sui.cjs');
  const app = express();
- app.use(cors());
+ app.use(cors({ origin: '*' }));
  app.use(express.json());
 
  app.get('/api/health', (req, res) => res.json({ ok: true }));

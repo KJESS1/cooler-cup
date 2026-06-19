@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 
 interface Message { role: 'user' | 'frost'; text: string; }
 
+const API = 'http://localhost:3000';
+
 export default function Chat({ address }: { address: string }) {
   const [messages, setMessages] = useState<Message[]>([
     { role: 'frost', text: "Yo! I'm Frost. Challenge me to a game, place a World Cup bet, or ask for your stats. What's it gonna be?" }
@@ -19,14 +21,14 @@ export default function Chat({ address }: { address: string }) {
     setMessages(m => [...m, { role: 'user', text: userMsg }]);
     setLoading(true);
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch(`${API}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address, message: userMsg }),
       });
       const data = await res.json();
       setMessages(m => [...m, { role: 'frost', text: data.reply || 'Frost glitched...' }]);
-    } catch {
+    } catch(e) {
       setMessages(m => [...m, { role: 'frost', text: 'Connection error. Try again.' }]);
     }
     setLoading(false);

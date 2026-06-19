@@ -1,16 +1,18 @@
- import { useState } from 'react';
+import { FaucetButton } from './components/FaucetButton';
+import { useState } from 'react';
  import { ConnectButton, useCurrentAccount } from '@mysten/dapp-kit';
  import Chat from './components/Chat';
  import GameBoard from './components/GameBoard';
  import VsFriendMatch from './components/VsFriendMatch';
-
+import WorldCup from './components/WorldCup';
  export default function App() {
    const account = useCurrentAccount();
-   const [view, setView] = useState<'game' | 'friend' | 'chat'>('game');
+   const [view, setView] = useState<'game' | 'friend' | 'worldcup' | 'chat'>('game');
 
    const tabs: { key: typeof view; label: string }[] = [
      { key: 'game', label: 'Vs Frost' },
      { key: 'friend', label: 'Vs Friend' },
+     { key: 'worldcup', label: 'World Cup' },
      { key: 'chat', label: 'Chat Frost' },
    ];
 
@@ -48,7 +50,11 @@
            <Chat address={account.address} />
          ) : view === 'friend' ? (
            <VsFriendMatch address={account.address} />
-         ) : (
+         ) : () : view === 'friend' ? (
+         <VsFriendMatch address={account.address} />
+       ) : view === 'worldcup' ? (
+         <WorldCup address={account.address} />
+       ) : (
            <GameBoard address={account.address} />
          )}
        </main>
