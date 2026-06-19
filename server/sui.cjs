@@ -1,8 +1,8 @@
 const { Transaction } = require('@mysten/sui/transactions');
-const { SuiClient, getFullnodeUrl } = require('@mysten/sui/client');
+const { SuiGrpcClient } = require('@mysten/sui/grpc');
 const { Ed25519Keypair } = require('@mysten/sui/keypairs/ed25519');
 
-const client = new SuiClient({ url: getFullnodeUrl('testnet') });
+const client = new SuiGrpcClient({ network: 'testnet', baseUrl: 'https://fullnode.testnet.sui.io:443' });
 const adminKeypair = Ed25519Keypair.fromSecretKey(process.env.ADMIN_PRIVATE_KEY);
 
 async function resolveGame(gameId, winnerAddress) {
@@ -11,7 +11,7 @@ async function resolveGame(gameId, winnerAddress) {
     target: `${process.env.PACKAGE_ID}::game_escrow::resolve_game`,
     arguments: [tx.object(process.env.ADMIN_CAP_ID), tx.object(gameId), tx.pure.address(winnerAddress)],
   });
-  return client.signAndExecuteTransaction({ signer: adminKeypair, transaction: tx, options: { showEffects: true } });
+  return client.signAndExecuteTransaction({ signer: adminKeypair, transaction: tx });
 }
 
 async function houseJoinGame(gameId, stakeMist) {
@@ -21,7 +21,7 @@ async function houseJoinGame(gameId, stakeMist) {
     target: `${process.env.PACKAGE_ID}::game_escrow::join_game`,
     arguments: [tx.object(gameId), coin],
   });
-  return client.signAndExecuteTransaction({ signer: adminKeypair, transaction: tx, options: { showEffects: true } });
+  return client.signAndExecuteTransaction({ signer: adminKeypair, transaction: tx });
 }
 
 module.exports = { resolveGame, houseJoinGame };

@@ -1,9 +1,9 @@
-const { SuiClient, getFullnodeUrl } = require('@mysten/sui/client');
-const { WalrusClient } = require('@mysten/walrus');
+const { SuiGrpcClient } = require('@mysten/sui/grpc');
+const { walrus } = require('@mysten/walrus');
 const { Ed25519Keypair } = require('@mysten/sui/keypairs/ed25519');
 
-const suiClient = new SuiClient({ url: getFullnodeUrl('mainnet') });
-const walrusClient = new WalrusClient({ network: 'mainnet', suiClient });
+const baseClient = new SuiGrpcClient({ network: 'mainnet', baseUrl: 'https://fullnode.mainnet.sui.io:443' });
+const client = baseClient.$extend(walrus({ network: 'mainnet' }));
 const walrusKeypair = Ed25519Keypair.fromSecretKey(process.env.WALRUS_WALLET_KEY);
 
 function defaultMemory(address) {
@@ -16,15 +16,16 @@ function defaultMemory(address) {
 
 async function writeMemory(address, memory) {
   const bytes = new TextEncoder().encode(JSON.stringify(memory));
-  const result = await walrusClient.writeBlob({
+  const { blobId } = await client.walrus.writeBlob({
     blob: bytes, deletable: true, epochs: 3, signer: walrusKeypair,
   });
-  return result.blobId;
+  return blobId;
 }
 
 async function readMemory(blobId) {
-  const bytes = await walrusClient.readBlob({ blobId });
-  return JSON.parse(new TextDecoder().decode(bytes));
+  const bytes = await client.walrus.readBlob({ blobId });
+  const text = new TextDecoder().decode(bytes);
+  return JSON.parse(text);
 }
 
 module.exports = { writeMemory, readMemory, defaultMemory };

@@ -1,96 +1,126 @@
-import React, { useState } from 'react';
-import { useSignAndExecuteTransaction } from '@mysten/dapp-kit';
-import { Transaction } from '@mysten/sui/transactions';
+ import { useState, useEffect } from 'react';
+ import { TEAMS, Team } from '../game/teams';
+ import { MatchSimulation } from './MatchSimulation';
+ import { MatchResult } from '../game/MatchScene';
 
-const TEAMS = [
-  { id: 'brazil', name: 'Brazil', color: '#FFD700' },
-  { id: 'argentina', name: 'Argentina', color: '#75AADB' },
-  { id: 'france', name: 'France', color: '#0055A4' },
-  { id: 'germany', name: 'Germany', color: '#DD0000' },
-  { id: 'england', name: 'England', color: '#CE1124' },
-  { id: 'spain', name: 'Spain', color: '#C60B1E' },
-];
+ interface Props {
+   address: string;
+ }
 
-const DIRECTIONS = ['Left', 'Center', 'Right'];
+ export default function GameBoard({ address }: Props) {
+   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
+   const [gameState, setGameState] = useState<'select' | 'playing' | 'result'>('select');
+   const [result, setResult] = useState<MatchResult | null>(null);
+   const [bias, setBias] = useState(0.5);
+   const [frostLine, setFrostLine] = useState('');
+   const agentTeam = TEAMS.find(t => t.id !== selectedTeam?.id) || TEAMS[1];
 
-export default function GameBoard({ address }: { address: string }) {
-  const [team, setTeam] = useState(TEAMS[0]);
-  const [phase, setPhase] = useState<'pick-team' | 'playing' | 'result'>('pick-team');
-  const [playerScore, setPlayerScore] = useState(0);
-  const [frostScore, setFrostScore] = useState(0);
-  const [round, setRound] = useState(0);
-  const [lastResult, setLastResult] = useState('');
-  const { mutate: signAndExecute } = useSignAndExecuteTransaction();
+   useEffect(() => {
+     fetch(`/api/memory/${address}`)
+       .then(r => r.json())
+       .then(mem => {
+         const winRate = mem.gamesPlayed > 0 ? mem.wins / mem.gamesPlayed : 0.5;
+         setBias(Math.max(0.25, 0.55 - winRate * 0.3));
+         if (mem.gamesPlayed > 0) {
+           setFrostLine(`Frost recalls: you're ${mem.wins}W-${mem.losses}L. Adjusting difficulty...`);
+         } else {
+           setFrostLine("Fresh blood. Let's see what you've got.");
+         }
+       });
+   }, [address]);
 
-  function shoot(dir: string) {
-    const frostDive = DIRECTIONS[Math.floor(Math.random() * 3)];
-    const scored = dir !== frostDive;
-    const newPlayerScore = playerScore + (scored ? 1 : 0);
-    const frostShoot = DIRECTIONS[Math.floor(Math.random() * 3)];
-    const playerSave = DIRECTIONS[Math.floor(Math.random() * 3)];
-    const frostScored = frostShoot !== playerSave;
-    const newFrostScore = frostScore + (frostScored ? 1 : 0);
-    setPlayerScore(newPlayerScore);
-    setFrostScore(newFrostScore);
-    setLastResult(`You shot ${dir} — ${scored ? '⚽ GOAL!' : '❌ Saved!'} | Frost shot ${frostShoot} — ${frostScored ? '⚽ Frost scores!' : '🧤 You saved!'}`);
-    const newRound = round + 1;
-    setRound(newRound);
-    if (newRound >= 5) {
-      setTimeout(() => {
-        setPhase('result');
-        saveResult(newPlayerScore > newFrostScore, newPlayerScore, newFrostScore);
-      }, 1000);
-    }
-  }
+   async function handleResult(res: MatchResult) {
+     setResult(res);
+     setGameState('result');
+     const won = res.winner === 'A';
+     const r = await fetch('/api/play', {
+       method: 'POST',
+       headers: { 'Content-Type': 'application/json' },
+       body: JSON.stringify({
+         address,
+         won,
+         team: selectedTeam?.name,
+         playerPicks: [],
+         agentPicks: [],
+       }),
+     });
+     const data = await r.json();
+     setFrostLine(won
+       ? `You won ${res.teamAScore}-${res.teamBScore}. Don't get comfortable. (Memory saved)`
+       : `I won ${res.teamBScore}-${res.teamAScore}. Come back when you're ready. (Memory saved)`
+     );
+   }
 
-  async function saveResult(won: boolean, ps: number, fs: number) {
-    await fetch('/api/play', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ address, won, team: team.id, playerPicks: [], agentPicks: [] }),
-    });
-  }
+   if (gameState === 'select') {
+     return (
+       <div style={{ maxWidth: 800, margin: '0 auto' }}>
+         {frostLine && (
+           <div style={{ background: '#111', border: '1px solid #00d4ff', borderRadius: 8, padding: '12px 16px', marginBottom: 24, color: '#00d4ff' }}>
+             🤖 Frost: {frostLine}
+           </div>
+         )}
+         <h2 style={{ color: '#fff', marginBottom: 16 }}>Pick Your Team</h2>
+         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+           {TEAMS.map(team => (
+             <button
+               key={team.id}
+               onClick={() => { setSelectedTeam(team); setGameState('playing'); }}
+               style={{
+                 background: team.primaryColor,
+                 color: team.secondaryColor,
+                 border: '2px solid #444',
+                 borderRadius: 10,
+                 padding: '20px 8px',
+                 cursor: 'pointer',
+                 fontWeight: 'bold',
+                 fontSize: 14,
+               }}
+             >
+               {team.name}
+             </button>
+           ))}
+         </div>
+       </div>
+     );
+   }
 
-  function reset() {
-    setPhase('pick-team'); setPlayerScore(0); setFrostScore(0); setRound(0); setLastResult('');
-  }
+   if (gameState === 'playing' && selectedTeam) {
+     return (
+       <div>
+         <div style={{ textAlign: 'center', color: '#888', marginBottom: 12 }}>
+           {frostLine}
+         </div>
+         <MatchSimulation
+           teamA={selectedTeam}
+           teamB={agentTeam}
+           teamABias={bias}
+           onComplete={handleResult}
+         />
+       </div>
+     );
+   }
 
-  if (phase === 'pick-team') return (
-    <div style={{ maxWidth: 600, margin: '0 auto', textAlign: 'center' }}>
-      <h2>Pick Your Team</h2>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center', marginBottom: 24 }}>
-        {TEAMS.map(t => (
-          <button key={t.id} onClick={() => setTeam(t)} style={{
-            padding: '12px 20px', borderRadius: 8, border: `3px solid ${team.id === t.id ? '#00d4ff' : 'transparent'}`,
-            background: t.color, color: '#fff', fontWeight: 'bold', cursor: 'pointer', textShadow: '0 1px 3px #000'
-          }}>{t.name}</button>
-        ))}
-      </div>
-      <button onClick={() => setPhase('playing')} style={{ padding: '14px 32px', borderRadius: 10, background: '#00d4ff', color: '#000', fontWeight: 'bold', fontSize: 18, border: 'none', cursor: 'pointer' }}>
-        Play vs Frost
-      </button>
-    </div>
-  );
+   if (gameState === 'result' && result) {
+     return (
+       <div style={{ textAlign: 'center', maxWidth: 600, margin: '60px auto' }}>
+         <h2 style={{ color: '#00d4ff', fontSize: 32 }}>
+           {result.winner === 'A' ? '🏆 You Won!' : result.winner === 'B' ? '😤 Frost Wins' : '🤝 Draw'}
+         </h2>
+         <p style={{ fontSize: 48, fontWeight: 'bold', color: '#fff' }}>
+           {result.teamAScore} - {result.teamBScore}
+         </p>
+         <div style={{ background: '#111', border: '1px solid #00d4ff', borderRadius: 8, padding: '12px 16px', margin: '20px 0', color: '#00d4ff' }}>
+           🤖 Frost: {frostLine}
+         </div>
+         <button
+           onClick={() => { setGameState('select'); setResult(null); }}
+           style={{ background: '#00d4ff', color: '#000', border: 'none', borderRadius: 8, padding: '12px 24px', cursor: 'pointer', fontWeight: 'bold', fontSize: 16 }}
+         >
+           Play Again
+         </button>
+       </div>
+     );
+   }
 
-  if (phase === 'result') return (
-    <div style={{ maxWidth: 600, margin: '0 auto', textAlign: 'center' }}>
-      <h2>{playerScore > frostScore ? '🏆 You Win!' : playerScore === frostScore ? '🤝 Draw!' : '❄️ Frost Wins!'}</h2>
-      <p style={{ fontSize: 24 }}>{playerScore} — {frostScore}</p>
-      <button onClick={reset} style={{ padding: '12px 28px', borderRadius: 8, background: '#00d4ff', color: '#000', fontWeight: 'bold', border: 'none', cursor: 'pointer' }}>Play Again</button>
-    </div>
-  );
-
-  return (
-    <div style={{ maxWidth: 600, margin: '0 auto', textAlign: 'center' }}>
-      <h2>Round {round + 1}/5 — {team.name} vs Frost</h2>
-      <div style={{ fontSize: 32, marginBottom: 16 }}>{playerScore} — {frostScore}</div>
-      {lastResult && <p style={{ color: '#aaa', marginBottom: 16 }}>{lastResult}</p>}
-      <p style={{ marginBottom: 12 }}>Where do you shoot?</p>
-      <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
-        {DIRECTIONS.map(d => (
-          <button key={d} onClick={() => shoot(d)} style={{ padding: '14px 24px', borderRadius: 8, background: '#222', color: '#fff', border: '1px solid #444', cursor: 'pointer', fontSize: 16 }}>{d}</button>
-        ))}
-      </div>
-    </div>
-  );
-}
+   return null;
+ }

@@ -12,7 +12,8 @@ const FAUCETS = [
 
 async function getMemory(address) {
   try {
-    const blobId = await db.get(`blobid:${address}`);
+    const blobIdResult = await db.get(`blobid:${address}`);
+    const blobId = blobIdResult && blobIdResult.value;
     return blobId ? await readMemory(blobId) : defaultMemory(address);
   } catch(e) {
     return defaultMemory(address);

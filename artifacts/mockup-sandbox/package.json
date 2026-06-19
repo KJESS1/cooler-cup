@@ -70,5 +70,10 @@
     "vaul": "^1.1.2",
     "vite": "catalog:",
     "zod": "catalog:"
+  },
+  "dependencies": {
+    "@mysten/dapp-kit": "0.14.0",
+    "@mysten/sui": "1.21.0",
+    "@tanstack/react-query": "catalog:"
   }
 }

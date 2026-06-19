@@ -1,0 +1,21 @@
+kind = "web"
+previewPath = "/"
+title = "Cooler Cup"
+version = "1.0.0"
+id = "cooler-cup-app"
+
+[[services]]
+localPort = 8082
+name = "Cooler Cup"
+paths = ["/"]
+
+[services.env]
+PORT = "8082"
+BASE_PATH = "/"
+
+[services.development]
+run = "pnpm --filter @workspace/cooler-cup run dev"
+
+[services.production]
+build = "pnpm --filter @workspace/cooler-cup run build"
+serve = "static"
