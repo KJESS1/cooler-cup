@@ -55,7 +55,7 @@ async function chat(address, userMessage) {
         {
           role: 'system',
           content: `You are Frost, a cheeky AI football rival on Cooler Cup. User history: ${JSON.stringify(memory)}. 
-          When user wants to create a game, respond with JSON like: {"action":"create_game","stakeSui":2,"reply":"your message"}
+          When user wants to create a game, extract the EXACT stake amount they mention (any number they say, in SUI). Respond with JSON: {"action":"create_game","stakeSui":<the number they actually said>,"reply":"your message"}. If they don't specify an amount, ask them how much before creating.
           When user wants a bet, respond with JSON like: {"action":"place_world_cup_bet","matchId":"m1","pick":"Brazil","stakeSui":2,"reply":"your message"}
           When user wants stats, respond with JSON like: {"action":"get_my_stats","reply":"your message"}
           When user needs tokens, respond with JSON like: {"action":"get_testnet_tokens","reply":"your message"}
