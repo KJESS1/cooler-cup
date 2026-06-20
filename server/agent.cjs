@@ -1,6 +1,6 @@
 const { writeMemory, readMemory, defaultMemory } = require('./walrus.cjs');
-const Database = require('@replit/database');
-const db = new Database();
+
+const blobIdStore = new Map();
 
 const MAX_STAKE_SUI = 5;
 const pendingActions = {};
@@ -12,8 +12,7 @@ const FAUCETS = [
 
 async function getMemory(address) {
   try {
-    const blobIdResult = await db.get(`blobid:${address}`);
-    const blobId = blobIdResult && blobIdResult.value;
+    const blobId = blobIdStore.get(`blobid:${address}`);
     return blobId ? await readMemory(blobId) : defaultMemory(address);
   } catch(e) {
     return defaultMemory(address);
@@ -22,7 +21,7 @@ async function getMemory(address) {
 
 async function saveMemory(address, memory) {
   const blobId = await writeMemory(address, memory);
-  await db.set(`blobid:${address}`, blobId);
+  blobIdStore.set(`blobid:${address}`, blobId);
   return blobId;
 }
 
