@@ -63,4 +63,12 @@
    res.json({ participants: gameParticipants[req.params.gameId] || [] });
  });
 
- app.listen(3000, () => console.log('Server running on port 3000'));
+
+const path = require('path');
+app.use(express.static(path.join(__dirname, '../dist')));
+app.get('/{*splat}', (req, res) => {
+  if (req.path.startsWith('/api')) return res.status(404).json({ error: 'not found' });
+  res.sendFile(path.join(__dirname, '../dist/index.html'));
+});
+
+app.listen(process.env.PORT || 3000, () => console.log('Server running'));
