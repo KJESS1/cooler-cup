@@ -1,4 +1,4 @@
- import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
  import { TEAMS, Team } from '../game/teams';
  import { MatchSimulation } from './MatchSimulation';
  import { MatchResult } from '../game/MatchScene';
@@ -16,7 +16,7 @@
    const agentTeam = TEAMS.find(t => t.id !== selectedTeam?.id) || TEAMS[1];
 
    useEffect(() => {
-     fetch(`/api/memory/${address}`)
+       fetch(`/api/memory/${address}`)
        .then(r => r.json())
        .then(mem => {
          const winRate = mem.gamesPlayed > 0 ? mem.wins / mem.gamesPlayed : 0.5;
@@ -33,7 +33,7 @@
      setResult(res);
      setGameState('result');
      const won = res.winner === 'A';
-     const r = await fetch('/api/play', {
+       const r = await fetch(`/api/play`, {
        method: 'POST',
        headers: { 'Content-Type': 'application/json' },
        body: JSON.stringify({

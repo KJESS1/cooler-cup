@@ -1,7 +1,5 @@
 import type { PlayerMemory, Zone } from './types.js';
 
-type ZoneWeights = Partial<Record<Zone, number>>;
-
 export function agentDiveChoice(memory: PlayerMemory): Zone {
   const zones: Zone[] = ['TL', 'TR', 'BL', 'BR', 'C'];
   const weights = zones.map((z) => (memory.kickHistory[z] ?? 1) as number);
@@ -30,19 +28,18 @@ export function agentKickChoice(memory: PlayerMemory): Zone {
 }
 
 export async function askFrost(memory: PlayerMemory, context: string): Promise<string> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     return "I'd say something clever, but my brain's offline. Good luck anyway.";
   }
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
+      'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-5',
+      model: 'meta-llama/llama-3.3-70b-instruct',
       max_tokens: 200,
       messages: [
         {
@@ -57,8 +54,8 @@ Reply in 1-2 short, playful sentences referencing their history if relevant.`,
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Anthropic error ${res.status}: ${text}`);
+    throw new Error(`OpenRouter error ${res.status}: ${text}`);
   }
-  const data = (await res.json()) as { content: Array<{ type: string; text?: string }> };
-  return data.content.find((c) => c.type === 'text')?.text ?? "Let's play.";
+  const data = await res.json() as { choices: Array<{ message: { content: string } }> };
+  return data.choices[0]?.message?.content ?? "Let's play.";
 }

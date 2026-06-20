@@ -32,7 +32,7 @@ export default function WorldCup({ address }: Props) {
         onSuccess: (res: any) => {
           const created = res.objectChanges?.find((c: any) => c.objectType?.includes('::Game'));
           const id = created?.objectId || res.digest;
-          fetch('/api/chat', {
+            fetch(`/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

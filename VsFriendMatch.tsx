@@ -22,7 +22,7 @@ export default function VsFriendMatch({ address }: Props) {
   const [result, setResult] = useState<MatchResult | null>(null);
 
   function registerJoin(id: string) {
-    fetch(`/api/game/${id}/joined`, {
+    fetch(`${API_BASE}/api/game/${id}/joined`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ address }),
@@ -79,7 +79,7 @@ export default function VsFriendMatch({ address }: Props) {
     setStatus('Match complete. Finding opponent address...');
 
     try {
-      const pr = await fetch(`/api/game/${gameId}/participants`);
+      const pr = await fetch(`${API_BASE}/api/game/${gameId}/participants`);
       const { participants } = await pr.json();
       const opponentAddress = participants.find((a: string) => a !== address);
 
@@ -94,7 +94,7 @@ export default function VsFriendMatch({ address }: Props) {
 
       const winnerAddress = res.winner === 'A' ? address : opponentAddress;
       setStatus('Requesting payout...');
-      const r = await fetch('/api/resolve', {
+        const r = await fetch(`${API_BASE}/api/resolve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ gameId, winnerAddress }),
